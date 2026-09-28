@@ -1,0 +1,14 @@
+name = "hr-request-bot"
+main = "src/index.ts"
+compatibility_date = "2024-09-01"
+# AsyncLocalStorage (node:async_hooks) — фоновые задачи привязываются к своему запросу
+compatibility_flags = ["nodejs_als"]
+
+kv_namespaces = [
+  { binding = "SESSIONS", id = "f3f61a119c83463596a4bb23037c6b18" }
+]
+
+# Секреты НЕ хранятся тут — задаются командой wrangler secret put:
+#   wrangler secret put TELEGRAM_BOT_TOKEN
+#   wrangler secret put APPS_SCRIPT_URL
+#   wrangler secret put APPS_SCRIPT_SECRET
