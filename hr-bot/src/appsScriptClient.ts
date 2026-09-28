@@ -6,9 +6,18 @@ async function callAppsScript(env: Env, body: Record<string, unknown>): Promise<
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, secret: env.APPS_SCRIPT_SECRET }),
   });
-  const json = await res.json().catch(() => ({ success: false, error: 'invalid JSON from Apps Script' }));
-  if (!json.success) {
-    console.error('Apps Script error:', json.error);
+  const text = await res.text();
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // вместо JSON Google отдаёт HTML-страницу — в ней и написана причина:
+    // ошибка загрузки скрипта, страница входа (закрыт доступ к веб-приложению) и т.п.
+    const page = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    json = { success: false, error: `Apps Script returned a page instead of JSON (HTTP ${res.status}): ${page}` };
+  }
+  if (!json?.success) {
+    console.error(`Apps Script error (${body.action}):`, json?.error);
   }
   return json;
 }
@@ -86,9 +95,20 @@ export interface RosterEntry {
   role: string;
 }
 
-export async function listEmployees(env: Env): Promise<RosterEntry[]> {
-  const res = await callAppsScript(env, { action: 'list_employees' });
-  return Array.isArray(res?.employees) ? res.employees : [];
+/** ok: false — таблица не ответила; это не то же самое, что "сотрудников нет". */
+export type RosterResult = { ok: true; employees: RosterEntry[] } | { ok: false; error: string };
+
+export async function listEmployees(env: Env): Promise<RosterResult> {
+  const res = await callAppsScript(env, { action: 'list_employees' }).catch((err) => ({
+    success: false,
+    error: String(err),
+  }));
+  if (res?.success && Array.isArray(res.employees)) {
+    return { ok: true, employees: res.employees };
+  }
+  const error = String(res?.error || 'unexpected response from Apps Script');
+  console.error(`list_employees failed, the employee list can't be shown: ${error}`);
+  return { ok: false, error };
 }
 
 export interface ReportPayload {

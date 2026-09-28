@@ -14,16 +14,27 @@ export async function sendEmployeeList(
   viewerTelegramId: number,
   departmentFilter?: string
 ) {
-  const [all, canEdit] = await Promise.all([
+  const [roster, canEdit] = await Promise.all([
     listEmployees(env),
     isAdminLevel(env, viewerTelegramId),
   ]);
+
+  // таблица не ответила — это не "сотрудников нет", говорим как есть
+  if (!roster.ok) {
+    await sendMessage(
+      env,
+      chatId,
+      `⚠️ Couldn't load the employee list from Google Sheets.\n\nReason: ${roster.error}\n\nTry again in a minute. If it keeps failing, check Apps Script → Executions.`
+    );
+    return;
+  }
+
   // HR и Super Admin менеджеру не подчиняются, даже если числятся в его отделе
   const employees = departmentFilter
-    ? all.filter(
+    ? roster.employees.filter(
         (e) => e.department === departmentFilter && e.role !== 'HR' && e.role !== 'Super Admin'
       )
-    : all;
+    : roster.employees;
 
   if (employees.length === 0) {
     await sendMessage(
