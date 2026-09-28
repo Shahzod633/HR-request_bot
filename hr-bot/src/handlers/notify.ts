@@ -1,5 +1,6 @@
 import type { Env, Employee } from '../types';
 import { sendMessage, type InlineKeyboard } from '../telegram';
+import { buildMessageButtons } from '../keyboards';
 import {
   getHrTelegramId,
   getManagerTelegramId,
@@ -19,11 +20,11 @@ export async function notifyResponsible(
   text: string,
   extraButtons: InlineKeyboard['inline_keyboard'] = []
 ) {
-  // переписка идёт через бота по telegramId — username не нужен
+  // переписка через бота — всегда; прямая ссылка на чат — если у сотрудника есть username
   const keyboard: InlineKeyboard = {
     inline_keyboard: [
       ...extraButtons,
-      [{ text: `✍️ Message ${employee.name}`, callback_data: `msg:${employee.telegramId}` }],
+      buildMessageButtons(employee.telegramId, employee.username, `✍️ Message ${employee.name}`),
     ],
   };
 

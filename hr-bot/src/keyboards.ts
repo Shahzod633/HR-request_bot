@@ -1,5 +1,27 @@
-import type { InlineKeyboard } from './telegram';
+import type { InlineButton, InlineKeyboard } from './telegram';
 import { DEPARTMENTS } from './config';
+
+/** Публичный username Telegram: латиница, цифры и "_", 4–32 символа. */
+const USERNAME_RE = /^[A-Za-z0-9_]{4,32}$/;
+
+/**
+ * Кнопки связи с человеком: "✍️ ..." — переписка через бота (работает всегда),
+ * и, если у него есть публичный username, "📇 Direct message" — личный чат напрямую.
+ * Кривой username (например, поправленный руками в таблице) ссылку не даёт:
+ * с неверным адресом Telegram отклонил бы всё сообщение вместе с кнопками.
+ */
+export function buildMessageButtons(
+  telegramId: number,
+  username: string | undefined,
+  label: string
+): InlineButton[] {
+  const buttons: InlineButton[] = [{ text: label, callback_data: `msg:${telegramId}` }];
+  const handle = (username ?? '').trim().replace(/^@/, '');
+  if (USERNAME_RE.test(handle)) {
+    buttons.push({ text: '📇 Direct message', url: `https://t.me/${handle}` });
+  }
+  return buttons;
+}
 
 /** 5 отделов кнопками. prefix разводит флоу: регистрация, роль, правка профиля. */
 export function buildDepartmentKeyboard(prefix: string): InlineKeyboard {

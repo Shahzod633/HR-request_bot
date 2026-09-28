@@ -1,11 +1,12 @@
 import type { Env } from '../types';
-import { sendMessage, type InlineButton } from '../telegram';
+import { sendMessage, type InlineKeyboard } from '../telegram';
 import { listEmployees } from '../appsScriptClient';
 import { isAdminLevel } from '../roles';
+import { buildMessageButtons } from '../keyboards';
 
 /**
- * Список сотрудников с кнопкой "Написать" у каждого (переписка идёт через бота)
- * и, для Admin и Super Admin, кнопкой правки профиля.
+ * Список сотрудников с кнопками связи у каждого (через бота и, если есть username,
+ * напрямую) и, для Admin и Super Admin, кнопкой правки профиля.
  * departmentFilter — для панели менеджера: он видит только свой отдел.
  */
 export async function sendEmployeeList(
@@ -59,13 +60,13 @@ export async function sendEmployeeList(
     const role = emp.role && emp.role !== 'Employee' ? `\nRole: ${emp.role}` : '';
     const text = `${emp.name}\nDepartment: ${emp.department || '—'}${shift}${role}`;
 
-    const buttons: InlineButton[] = [];
+    const rows: InlineKeyboard['inline_keyboard'] = [];
     if (emp.telegramId && emp.telegramId !== viewerTelegramId) {
-      buttons.push({ text: '✍️ Message', callback_data: `msg:${emp.telegramId}` });
+      rows.push(buildMessageButtons(emp.telegramId, emp.username, '✍️ Message'));
     }
     if (canEdit && emp.telegramId) {
-      buttons.push({ text: '✏️ Edit', callback_data: `profile:show:${emp.telegramId}` });
+      rows.push([{ text: '✏️ Edit', callback_data: `profile:show:${emp.telegramId}` }]);
     }
-    await sendMessage(env, chatId, text, buttons.length ? { inline_keyboard: [buttons] } : undefined);
+    await sendMessage(env, chatId, text, rows.length ? { inline_keyboard: rows } : undefined);
   }
 }
