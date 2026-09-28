@@ -1,5 +1,6 @@
 import type { Env, Employee } from '../types';
 import { sendMessage, type InlineKeyboard } from '../telegram';
+import { getSession } from '../session';
 import { buildMessageButtons } from '../keyboards';
 import {
   getHrTelegramId,
@@ -61,7 +62,8 @@ export async function notifyHrAndAdmin(env: Env, text: string) {
 
 /**
  * Кнопки "написать" ответственным — показываем сотруднику, когда его заявку
- * заблокировал лимит и надо связаться с людьми напрямую. Переписка идёт через бота.
+ * заблокировал лимит и надо связаться с людьми. Переписка через бота — всегда,
+ * прямая ссылка на чат — если у ответственного есть username.
  * selfTelegramId — сам сотрудник: себе писать незачем, даже если он, скажем, менеджер.
  */
 export async function buildContactButtons(
@@ -75,24 +77,27 @@ export async function buildContactButtons(
     getSuperAdminProfile(env),
   ]);
 
-  const contacts: { text: string; telegramId: number }[] = [];
-  if (manager) contacts.push({ text: `👔 Manager: ${manager.name || 'message'}`, telegramId: manager.telegramId });
-  if (hr) contacts.push({ text: `🧑‍💼 HR: ${hr.name || 'message'}`, telegramId: hr.telegramId });
+  const contacts: { text: string; telegramId: number; username?: string }[] = [];
+  if (manager) {
+    contacts.push({ text: `👔 Manager: ${manager.name || 'message'}`, telegramId: manager.telegramId, username: manager.username });
+  }
+  if (hr) contacts.push({ text: `🧑‍💼 HR: ${hr.name || 'message'}`, telegramId: hr.telegramId, username: hr.username });
   if (superAdmin) {
     contacts.push({
       text: `🛡 Super Admin: ${superAdmin.name || 'message'}`,
       telegramId: superAdmin.telegramId,
+      username: superAdmin.username,
     });
   }
   const adminId = Number(env.ADMIN_TELEGRAM_ID);
   if (adminId) contacts.push({ text: '⚙️ Admin', telegramId: adminId });
 
-  const rows: InlineKeyboard['inline_keyboard'] = [];
-  const seen = new Set<number>([selfTelegramId]);
-  for (const c of contacts) {
-    if (seen.has(c.telegramId)) continue;
-    seen.add(c.telegramId);
-    rows.push([{ text: c.text, callback_data: `msg:${c.telegramId}` }]);
-  }
-  return rows;
+  const unique = contacts.filter(
+    (c, i) => c.telegramId !== selfTelegramId && contacts.findIndex((x) => x.telegramId === c.telegramId) === i
+  );
+  // свежий username — из сессии (его обновляет каждый /start), иначе из профиля роли
+  const sessions = await Promise.all(unique.map((c) => getSession(env, c.telegramId)));
+  return unique.map((c, i) =>
+    buildMessageButtons(c.telegramId, sessions[i].employee?.username || c.username, c.text)
+  );
 }
