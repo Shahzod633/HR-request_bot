@@ -22,5 +22,8 @@ export function runInBackground(promise: Promise<unknown>): void {
   const ctx = requestContext.getStore();
   if (ctx) {
     ctx.waitUntil(guarded);
+  } else {
+    // без ctx Cloudflare оборвёт задачу вместе с запросом — пусть это будет видно в логах
+    console.error('runInBackground: no request context, the background task may be cut off');
   }
 }
