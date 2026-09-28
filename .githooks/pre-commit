@@ -1,0 +1,47 @@
+#!/bin/sh
+# Не даёт закоммитить секреты бота и реальные Telegram ID.
+# Включается один раз в каждом клоне:  git config core.hooksPath .githooks
+# Ложное срабатывание — обойти:        git commit --no-verify
+# Двоичные файлы (.docx и т.п.) хук не читает — их содержимое проверяйте сами.
+
+status=0
+
+# 1. файлы с секретами — даже если их добавили через git add -f
+files=$(git diff --cached --name-only --diff-filter=ACMR |
+  grep -E '(^|/)(\.dev\.vars|\.env)(\.[^/]*)?$' | grep -vE '\.example$')
+if [ -n "$files" ]; then
+  echo "Blocked: these files hold secrets and must not be committed:"
+  printf '%s\n' "$files" | sed 's/^/   /'
+  status=1
+fi
+
+# 2. добавляемые строки в виде "файл:строка:текст"
+added=$(git diff --cached -U0 --no-color --diff-filter=ACMR | awk '
+  /^\+\+\+ / { file = substr($0, 7); next }
+  /^@@/      { split($3, a, ","); line = substr(a[1], 2) + 0; next }
+  /^\+/      { print file ":" line ":" substr($0, 2); line++ }
+')
+
+check() {
+  found=$(printf '%s\n' "$added" | grep -iE -- "$2" | cut -d: -f1,2)
+  if [ -n "$found" ]; then
+    echo "Blocked: looks like $1:"
+    printf '%s\n' "$found" | sed 's/^/   /'
+    status=1
+  fi
+}
+
+check 'a Telegram bot token' '[0-9]{8,10}:[a-z0-9_-]{35}'
+check 'an Apps Script web app URL' 'script\.google\.com/macros/s/[a-z0-9_-]{20,}'
+# NAME=value (.dev.vars, [vars] в wrangler.toml) и "NAME": "value" (JSON); тип "NAME: string" не трогаем
+check 'a secret value' '(telegram_bot_token|apps_script_secret|apps_script_url|admin_telegram_id|secret_token)"?[[:space:]]*(=|:[[:space:]]*")[[:space:]]*"?[^"[:space:]]{4,}'
+check 'a real Telegram ID' 'telegram_?id"?[[:space:]]*[:=][[:space:]]*"?[0-9]{6,}'
+# выгрузка KV: session:<id>, access:<id>, relay:<id>, count:late:<id>...
+check 'a KV key with a Telegram ID' '(session|access|relay|count:[a-z]+):[0-9]{6,}'
+
+if [ "$status" -ne 0 ]; then
+  echo
+  echo "Commit stopped. Bot secrets go to 'npx wrangler secret put', not into files."
+  echo "If this is a false positive: git commit --no-verify"
+fi
+exit $status
