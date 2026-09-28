@@ -1,0 +1,8 @@
+# Образец для локального `npx wrangler dev`: скопируйте в .dev.vars и заполните.
+# Сам .dev.vars в Git не попадает (.gitignore). В продакшене эти значения
+# задаются только через `npx wrangler secret put <ИМЯ>`.
+TELEGRAM_BOT_TOKEN=
+APPS_SCRIPT_URL=
+APPS_SCRIPT_SECRET=
+ADMIN_TELEGRAM_ID=
+TELEGRAM_BOT_USERNAME=

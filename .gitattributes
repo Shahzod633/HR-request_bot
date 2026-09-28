@@ -1,0 +1,2 @@
+# хук исполняет sh: с окончаниями строк CRLF (autocrlf на Windows) он не запустится
+.githooks/* text eol=lf
