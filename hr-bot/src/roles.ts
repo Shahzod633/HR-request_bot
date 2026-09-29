@@ -2,7 +2,9 @@ import type { Env, RoleProfile } from './types';
 import { DEPARTMENTS } from './config';
 
 const HR_KEY = 'role:hr';
-const SUPER_ADMIN_KEY = 'role:super_admin';
+const SUPER_ADMINS_KEY = 'role:super_admins';
+/** так Super Admin хранился, пока он был один — читаем для переноса в список */
+const LEGACY_SUPER_ADMIN_KEY = 'role:super_admin';
 const managerKey = (departmentId: string) => `role:manager:${departmentId}`;
 const inviteKey = (token: string) => `invite:${token}`;
 
@@ -17,8 +19,7 @@ export function isAdmin(env: Env, telegramId: number): boolean {
  */
 export async function isAdminLevel(env: Env, telegramId: number): Promise<boolean> {
   if (isAdmin(env, telegramId)) return true;
-  const superAdmin = await getSuperAdminProfile(env);
-  return !!superAdmin && superAdmin.telegramId === telegramId;
+  return isSuperAdmin(env, telegramId);
 }
 
 /**
@@ -62,18 +63,44 @@ export async function setHrProfile(env: Env, profile: RoleProfile): Promise<void
 
 // ---------- Super Admin ----------
 
-/** Super Admin — одна роль на одного человека, как HR. */
-export async function getSuperAdminProfile(env: Env): Promise<RoleProfile | null> {
-  return readProfile(env, SUPER_ADMIN_KEY);
+/** Super Admin может быть несколько (в отличие от HR) — храним список. */
+export async function getSuperAdmins(env: Env): Promise<RoleProfile[]> {
+  const raw = await env.SESSIONS.get(SUPER_ADMINS_KEY);
+  if (raw) {
+    try {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) return list as RoleProfile[];
+    } catch {
+      // битая запись — ниже попробуем старый формат
+    }
+  }
+  // раньше Super Admin был один — подхватываем его, чтобы назначенный не слетел
+  const legacy = await readProfile(env, LEGACY_SUPER_ADMIN_KEY);
+  return legacy ? [legacy] : [];
 }
 
-export async function getSuperAdminTelegramId(env: Env): Promise<string | null> {
-  const p = await readProfile(env, SUPER_ADMIN_KEY);
-  return p ? String(p.telegramId) : null;
+async function saveSuperAdmins(env: Env, list: RoleProfile[]): Promise<void> {
+  await env.SESSIONS.put(SUPER_ADMINS_KEY, JSON.stringify(list));
+  await env.SESSIONS.delete(LEGACY_SUPER_ADMIN_KEY);
 }
 
-export async function setSuperAdminProfile(env: Env, profile: RoleProfile): Promise<void> {
-  await writeProfile(env, SUPER_ADMIN_KEY, profile);
+export async function isSuperAdmin(env: Env, telegramId: number): Promise<boolean> {
+  return (await getSuperAdmins(env)).some((p) => p.telegramId === telegramId);
+}
+
+/** Добавляет в список; если человек уже Super Admin — обновляет его профиль. */
+export async function addSuperAdmin(env: Env, profile: RoleProfile): Promise<void> {
+  const list = (await getSuperAdmins(env)).filter((p) => p.telegramId !== profile.telegramId);
+  list.push(profile);
+  await saveSuperAdmins(env, list);
+}
+
+/** Снимает роль; возвращает профиль снятого или null, если такого не было. */
+export async function removeSuperAdmin(env: Env, telegramId: number): Promise<RoleProfile | null> {
+  const list = await getSuperAdmins(env);
+  const removed = list.find((p) => p.telegramId === telegramId) ?? null;
+  if (removed) await saveSuperAdmins(env, list.filter((p) => p.telegramId !== telegramId));
+  return removed;
 }
 
 // ---------- Менеджеры ----------
@@ -160,12 +187,12 @@ export interface RoleInfo {
 export async function getRoleInfo(env: Env, telegramId: number): Promise<RoleInfo> {
   const [hr, superAdmin, managerOf] = await Promise.all([
     getHrProfile(env),
-    getSuperAdminProfile(env),
+    isSuperAdmin(env, telegramId),
     findManagerDepartment(env, telegramId),
   ]);
   return {
     admin: isAdmin(env, telegramId),
-    superAdmin: !!superAdmin && superAdmin.telegramId === telegramId,
+    superAdmin,
     hr: !!hr && hr.telegramId === telegramId,
     managerOf,
   };
@@ -186,12 +213,15 @@ export function isDepartmentRoleBound(roles: RoleInfo): boolean {
 
 /** Человек сменил имя — обновляем его профили ролей, чтобы панель /admin показывала новое. */
 export async function renameRoleProfiles(env: Env, telegramId: number, name: string): Promise<void> {
-  const [hr, superAdmin] = await Promise.all([getHrProfile(env), getSuperAdminProfile(env)]);
+  const [hr, superAdmins] = await Promise.all([getHrProfile(env), getSuperAdmins(env)]);
   if (hr && hr.telegramId === telegramId) {
     await setHrProfile(env, { ...hr, name });
   }
-  if (superAdmin && superAdmin.telegramId === telegramId) {
-    await setSuperAdminProfile(env, { ...superAdmin, name });
+  if (superAdmins.some((p) => p.telegramId === telegramId)) {
+    await saveSuperAdmins(
+      env,
+      superAdmins.map((p) => (p.telegramId === telegramId ? { ...p, name } : p))
+    );
   }
   // один человек может руководить и несколькими отделами
   for (const d of DEPARTMENTS) {

@@ -1,11 +1,12 @@
-import type { Env } from '../types';
+import type { Env, RoleProfile } from '../types';
 import { sendMessage, answerCallbackQuery, type InlineKeyboard } from '../telegram';
 import {
   isAdmin,
   isAdminLevel,
   getHrTelegramId,
   getHrProfile,
-  getSuperAdminProfile,
+  getSuperAdmins,
+  removeSuperAdmin,
   getManagerProfile,
   createInvite,
   consumeInvite,
@@ -17,6 +18,67 @@ import { startRegistration } from './registration';
 import { grantEmployeeAccess } from '../access';
 import { sendEmployeeList } from './employeeList';
 import { DEPARTMENTS, findDepartment } from '../config';
+import { registerRolePerson } from '../appsScriptClient';
+import { runInBackground } from '../background';
+
+const personName = (p: RoleProfile) => p.name || `id ${p.telegramId}`;
+
+/**
+ * Меню владельца: кто сейчас Super Admin и снятие роли.
+ *   admin:super_admins        — список, у каждого кнопка «❌ Remove»
+ *   admin:sa_remove:<id>      — подтверждение
+ *   admin:sa_remove_yes:<id>  — снять роль
+ */
+async function handleSuperAdminsMenu(env: Env, chatId: number, data: string) {
+  if (data === 'admin:super_admins') {
+    const list = await getSuperAdmins(env);
+    if (!list.length) {
+      await sendMessage(env, chatId, 'No Super Admins yet. Add one with «🛡 Assign Super Admin».');
+      return;
+    }
+    await sendMessage(env, chatId, `🛡 Super Admins: ${list.length}`);
+    for (const p of list) {
+      await sendMessage(env, chatId, `${personName(p)}\nDepartment: ${p.department || '—'}`, {
+        inline_keyboard: [[{ text: '❌ Remove', callback_data: `admin:sa_remove:${p.telegramId}` }]],
+      });
+    }
+    return;
+  }
+
+  const [, action, rawId] = data.split(':');
+  const telegramId = Number(rawId);
+  const target = (await getSuperAdmins(env)).find((p) => p.telegramId === telegramId);
+  if (!target) {
+    await sendMessage(env, chatId, 'This person is not a Super Admin anymore.');
+    return;
+  }
+
+  if (action === 'sa_remove') {
+    await sendMessage(env, chatId, `Remove the Super Admin role from ${personName(target)}?`, {
+      inline_keyboard: [
+        [{ text: '✅ Yes, remove', callback_data: `admin:sa_remove_yes:${telegramId}` }],
+        [{ text: '❌ Cancel', callback_data: 'admin:super_admins' }],
+      ],
+    });
+    return;
+  }
+
+  if (action === 'sa_remove_yes') {
+    await removeSuperAdmin(env, telegramId);
+    // профиль сотрудника остаётся; в листе Employees пометку роли меняем на Employee
+    runInBackground(
+      registerRolePerson(env, {
+        telegramId,
+        name: target.name,
+        department: target.department,
+        username: target.username || '',
+        role: 'Employee',
+      })
+    );
+    await sendMessage(env, telegramId, 'ℹ️ Your Super Admin role has been removed by Admin.');
+    await sendMessage(env, chatId, `✅ ${personName(target)} is no longer a Super Admin.`);
+  }
+}
 
 export async function handleAdminCommand(env: Env, chatId: number, telegramId: number) {
   const admin = isAdmin(env, telegramId);
@@ -45,22 +107,20 @@ export async function handleAdminCommand(env: Env, chatId: number, telegramId: n
   if (adminLevel) {
     rows.push([{ text: '➕ Assign HR', callback_data: 'admin:assign_hr' }]);
   }
-  // назначать Super Admin — только настоящий Admin
+  // назначать и снимать Super Admin — только настоящий Admin (владелец бота)
   if (admin) {
     rows.push([{ text: '🛡 Assign Super Admin', callback_data: 'admin:assign_super_admin' }]);
+    rows.push([{ text: '🛡 Super Admins', callback_data: 'admin:super_admins' }]);
   }
 
   const title = admin ? 'Admin panel.' : adminLevel ? 'Super Admin panel.' : 'HR panel.';
-  const [hrProfile, superAdminProfile] = await Promise.all([
-    getHrProfile(env),
-    getSuperAdminProfile(env),
-  ]);
+  const [hrProfile, superAdmins] = await Promise.all([getHrProfile(env), getSuperAdmins(env)]);
   const hrLine = hrProfile
     ? `Current HR: ${hrProfile.name || `id ${hrProfile.telegramId}`}`
     : 'HR is not assigned yet.';
-  const superAdminLine = superAdminProfile
-    ? `Current Super Admin: ${superAdminProfile.name || `id ${superAdminProfile.telegramId}`}`
-    : 'Super Admin is not assigned yet.';
+  const superAdminLine = superAdmins.length
+    ? `Super Admins (${superAdmins.length}): ${superAdmins.map(personName).join(', ')}`
+    : 'No Super Admins yet.';
 
   const mgrLines: string[] = [];
   for (const d of DEPARTMENTS) {
@@ -117,8 +177,19 @@ export async function handleAdminCallback(
     await sendMessage(
       env,
       chatId,
-      `Super Admin assignment link (single use, valid 24 hours):\n${buildInviteLink(env, token)}\n\nForward it to the right person. Once they open the link they become Super Admin (the previous Super Admin is replaced).`
+      `Super Admin assignment link (single use, valid 24 hours):\n${buildInviteLink(env, token)}\n\nForward it to the right person. Once they open the link they are added to the Super Admins — the current ones keep their role.`
     );
+    return;
+  }
+
+  // список Super Admin и снятие роли — только настоящий Admin
+  if (data === 'admin:super_admins' || data.startsWith('admin:sa_')) {
+    if (!admin) {
+      await answerCallbackQuery(env, callbackQueryId, 'Only Admin can manage Super Admins');
+      return;
+    }
+    await answerCallbackQuery(env, callbackQueryId);
+    await handleSuperAdminsMenu(env, chatId, data);
     return;
   }
 
