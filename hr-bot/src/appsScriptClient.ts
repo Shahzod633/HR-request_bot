@@ -77,7 +77,8 @@ export interface RolePersonPayload {
   name: string;
   department: string;
   username: string;
-  role: 'HR' | 'Manager' | 'Super Admin';
+  /** Employee — когда роль сняли: строка остаётся, меняется только пометка */
+  role: 'HR' | 'Manager' | 'Super Admin' | 'Employee';
 }
 
 /** Записывает HR/менеджера/Super Admin в лист Employees с пометкой роли. */
