@@ -2,7 +2,7 @@ import type { Env, RoleKind, RoleProfile, Session } from '../types';
 import { findDepartment } from '../config';
 import { sendMessage, answerCallbackQuery } from '../telegram';
 import { saveSession } from '../session';
-import { setHrProfile, setManagerProfile, setSuperAdminProfile } from '../roles';
+import { setHrProfile, setManagerProfile, addSuperAdmin } from '../roles';
 import { registerRolePerson } from '../appsScriptClient';
 import { runInBackground } from '../background';
 import { buildDepartmentKeyboard } from '../keyboards';
@@ -105,7 +105,8 @@ async function finishRoleRegistration(
   if (role === 'hr') {
     await setHrProfile(env, profile);
   } else if (role === 'super_admin') {
-    await setSuperAdminProfile(env, profile);
+    // Super Admin может быть несколько — новый добавляется к списку, никого не вытесняя
+    await addSuperAdmin(env, profile);
   } else {
     await setManagerProfile(env, departmentId, profile);
   }

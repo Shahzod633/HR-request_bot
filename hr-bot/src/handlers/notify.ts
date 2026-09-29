@@ -5,10 +5,9 @@ import { buildMessageButtons } from '../keyboards';
 import {
   getHrTelegramId,
   getManagerTelegramId,
-  getSuperAdminTelegramId,
   getHrProfile,
   getManagerProfile,
-  getSuperAdminProfile,
+  getSuperAdmins,
 } from '../roles';
 
 /**
@@ -29,16 +28,16 @@ export async function notifyResponsible(
     ],
   };
 
-  const [managerId, hrId, superAdminId] = await Promise.all([
+  const [managerId, hrId, superAdmins] = await Promise.all([
     getManagerTelegramId(env, employee.departmentId),
     getHrTelegramId(env),
-    getSuperAdminTelegramId(env),
+    getSuperAdmins(env),
   ]);
 
   const recipients = new Set<string>();
   if (managerId) recipients.add(managerId);
   if (hrId) recipients.add(hrId);
-  if (superAdminId) recipients.add(superAdminId);
+  for (const sa of superAdmins) recipients.add(String(sa.telegramId));
   if (env.ADMIN_TELEGRAM_ID) recipients.add(env.ADMIN_TELEGRAM_ID);
 
   // параллельно — иначе каждый получатель добавляет секунду ожидания
@@ -47,14 +46,11 @@ export async function notifyResponsible(
 
 /** Отдельный алерт только HR, Super Admin и Admin — например о повторных опозданиях. */
 export async function notifyHrAndAdmin(env: Env, text: string) {
-  const [hrId, superAdminId] = await Promise.all([
-    getHrTelegramId(env),
-    getSuperAdminTelegramId(env),
-  ]);
+  const [hrId, superAdmins] = await Promise.all([getHrTelegramId(env), getSuperAdmins(env)]);
 
   const recipients = new Set<string>();
   if (hrId) recipients.add(hrId);
-  if (superAdminId) recipients.add(superAdminId);
+  for (const sa of superAdmins) recipients.add(String(sa.telegramId));
   if (env.ADMIN_TELEGRAM_ID) recipients.add(env.ADMIN_TELEGRAM_ID);
 
   await Promise.all([...recipients].map((id) => sendMessage(env, Number(id), text)));
@@ -71,10 +67,10 @@ export async function buildContactButtons(
   departmentId: string,
   selfTelegramId: number
 ): Promise<InlineKeyboard['inline_keyboard']> {
-  const [manager, hr, superAdmin] = await Promise.all([
+  const [manager, hr, superAdmins] = await Promise.all([
     getManagerProfile(env, departmentId),
     getHrProfile(env),
-    getSuperAdminProfile(env),
+    getSuperAdmins(env),
   ]);
 
   const contacts: { text: string; telegramId: number; username?: string }[] = [];
@@ -82,11 +78,11 @@ export async function buildContactButtons(
     contacts.push({ text: `👔 Manager: ${manager.name || 'message'}`, telegramId: manager.telegramId, username: manager.username });
   }
   if (hr) contacts.push({ text: `🧑‍💼 HR: ${hr.name || 'message'}`, telegramId: hr.telegramId, username: hr.username });
-  if (superAdmin) {
+  for (const sa of superAdmins) {
     contacts.push({
-      text: `🛡 Super Admin: ${superAdmin.name || 'message'}`,
-      telegramId: superAdmin.telegramId,
-      username: superAdmin.username,
+      text: `🛡 Super Admin: ${sa.name || 'message'}`,
+      telegramId: sa.telegramId,
+      username: sa.username,
     });
   }
   const adminId = Number(env.ADMIN_TELEGRAM_ID);

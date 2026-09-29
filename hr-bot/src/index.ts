@@ -28,7 +28,7 @@ import {
 } from './handlers/profile';
 import {
   getHrProfile,
-  getSuperAdminProfile,
+  getSuperAdmins,
   findManagerDepartment,
   getManagerProfile,
 } from './roles';
@@ -125,15 +125,16 @@ async function handleUpdate(env: Env, update: TgUpdate) {
       }
 
       // HR, Super Admin и менеджеры не проходят регистрацию сотрудника — у них своя панель
-      const [hrProfile, superAdminProfile, mgrDept] = await Promise.all([
+      const [hrProfile, superAdmins, mgrDept] = await Promise.all([
         getHrProfile(env),
-        getSuperAdminProfile(env),
+        getSuperAdmins(env),
         findManagerDepartment(env, telegramId),
       ]);
+      const superAdminProfile = superAdmins.find((p) => p.telegramId === telegramId);
       const roleProfile =
         hrProfile && hrProfile.telegramId === telegramId
           ? hrProfile
-          : superAdminProfile && superAdminProfile.telegramId === telegramId
+          : superAdminProfile
             ? superAdminProfile
             : mgrDept
               ? await getManagerProfile(env, mgrDept.id)

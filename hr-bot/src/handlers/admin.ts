@@ -1,11 +1,11 @@
-import type { Env } from '../types';
+import type { Env, RoleProfile } from '../types';
 import { sendMessage, answerCallbackQuery, type InlineKeyboard } from '../telegram';
 import {
   isAdmin,
   isAdminLevel,
   getHrTelegramId,
   getHrProfile,
-  getSuperAdminProfile,
+  getSuperAdmins,
   getManagerProfile,
   createInvite,
   consumeInvite,
@@ -17,6 +17,8 @@ import { startRegistration } from './registration';
 import { grantEmployeeAccess } from '../access';
 import { sendEmployeeList } from './employeeList';
 import { DEPARTMENTS, findDepartment } from '../config';
+
+const personName = (p: RoleProfile) => p.name || `id ${p.telegramId}`;
 
 export async function handleAdminCommand(env: Env, chatId: number, telegramId: number) {
   const admin = isAdmin(env, telegramId);
@@ -45,22 +47,19 @@ export async function handleAdminCommand(env: Env, chatId: number, telegramId: n
   if (adminLevel) {
     rows.push([{ text: '➕ Assign HR', callback_data: 'admin:assign_hr' }]);
   }
-  // назначать Super Admin — только настоящий Admin
+  // назначать Super Admin — только настоящий Admin (владелец бота)
   if (admin) {
     rows.push([{ text: '🛡 Assign Super Admin', callback_data: 'admin:assign_super_admin' }]);
   }
 
   const title = admin ? 'Admin panel.' : adminLevel ? 'Super Admin panel.' : 'HR panel.';
-  const [hrProfile, superAdminProfile] = await Promise.all([
-    getHrProfile(env),
-    getSuperAdminProfile(env),
-  ]);
+  const [hrProfile, superAdmins] = await Promise.all([getHrProfile(env), getSuperAdmins(env)]);
   const hrLine = hrProfile
     ? `Current HR: ${hrProfile.name || `id ${hrProfile.telegramId}`}`
     : 'HR is not assigned yet.';
-  const superAdminLine = superAdminProfile
-    ? `Current Super Admin: ${superAdminProfile.name || `id ${superAdminProfile.telegramId}`}`
-    : 'Super Admin is not assigned yet.';
+  const superAdminLine = superAdmins.length
+    ? `Super Admins (${superAdmins.length}): ${superAdmins.map(personName).join(', ')}`
+    : 'No Super Admins yet.';
 
   const mgrLines: string[] = [];
   for (const d of DEPARTMENTS) {
@@ -117,7 +116,7 @@ export async function handleAdminCallback(
     await sendMessage(
       env,
       chatId,
-      `Super Admin assignment link (single use, valid 24 hours):\n${buildInviteLink(env, token)}\n\nForward it to the right person. Once they open the link they become Super Admin (the previous Super Admin is replaced).`
+      `Super Admin assignment link (single use, valid 24 hours):\n${buildInviteLink(env, token)}\n\nForward it to the right person. Once they open the link they are added to the Super Admins — the current ones keep their role.`
     );
     return;
   }
