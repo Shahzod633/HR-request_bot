@@ -11,7 +11,7 @@ import {
   renameRoleProfiles,
   type RoleInfo,
 } from '../roles';
-import { updateEmployeeName, updateEmployeeDepartment } from '../appsScriptClient';
+import { updateEmployeeName, updateEmployeeDepartment, syncDepartmentManager } from '../appsScriptClient';
 import { runInBackground } from '../background';
 import { showHomeMenu } from './menu';
 
@@ -82,6 +82,12 @@ export async function saveProfileSubject(
   await saveSession(env, editorTelegramId, { ...editorSession, state: { step: 'idle' } });
 }
 
+/** Текущий менеджер отдела: назначенный, иначе запасное имя из схемы, иначе сохранённое. */
+async function currentManagerName(env: Env, departmentId: string, stored: string): Promise<string> {
+  const mgr = departmentId ? await getManagerProfile(env, departmentId) : null;
+  return mgr?.name || findDepartment(departmentId)?.manager || stored;
+}
+
 function roleLabel(roles: RoleInfo): string {
   const parts: string[] = [];
   if (roles.admin) parts.push('Admin');
@@ -121,7 +127,9 @@ export async function showProfile(
     `Name: ${e.name}`,
     `Department: ${e.department || '—'}`,
   ];
-  if (!roleBound && e.manager) lines.push(`Manager: ${e.manager}`);
+  // менеджер — текущий: его могли переименовать или сменить после регистрации сотрудника
+  const manager = roleBound ? '' : await currentManagerName(env, e.departmentId, e.manager);
+  if (manager) lines.push(`Manager: ${manager}`);
   if (!roleBound || e.scheduledStart) lines.push(`Shift starts: ${e.scheduledStart || 'not set'}`);
   lines.push(`Role: ${roleLabel(roles)}`);
 
@@ -213,9 +221,13 @@ export async function handleNameEditInput(
 
   await saveProfileSubject(env, telegramId, session, subject, employee);
   // HR / менеджер / Super Admin — чтобы панель /admin сразу показывала новое имя
-  await renameRoleProfiles(env, subject.telegramId, name);
+  const managedDepartments = await renameRoleProfiles(env, subject.telegramId, name);
   // лист Employees + строка в листе текущего месяца
   runInBackground(updateEmployeeName(env, subject.telegramId, name, oldName));
+  // переименовали менеджера — колонка Manager у сотрудников его отделов
+  for (const department of managedDepartments) {
+    runInBackground(syncDepartmentManager(env, department, name));
+  }
 
   await sendMessage(env, chatId, `✅ Name updated: ${name}`);
   await showHomeMenu(env, chatId, telegramId);
