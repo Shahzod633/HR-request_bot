@@ -82,6 +82,11 @@ export async function updateEmployeeDepartment(
   return callAppsScript(env, { action: 'update_department', telegramId, department, manager });
 }
 
+/** Колонка Manager у сотрудников отдела — после переименования или смены менеджера. */
+export async function syncDepartmentManager(env: Env, department: string, manager: string) {
+  return callAppsScript(env, { action: 'sync_department_manager', department, manager });
+}
+
 export interface RolePersonPayload {
   telegramId: number;
   name: string;
