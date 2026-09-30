@@ -57,6 +57,9 @@ function doPost(e) {
     if (body.action === 'update_department') {
       return jsonResponse_(handleUpdateDepartment_(body));
     }
+    if (body.action === 'sync_department_manager') {
+      return jsonResponse_(handleSyncDepartmentManager_(body));
+    }
     if (body.action === 'late_checkin_count') {
       return jsonResponse_(handleLateCheckinCount_(body));
     }
@@ -287,6 +290,33 @@ function handleUpdateDepartment_(body) {
 
   empSheet.getRange(row, 3, 1, 2).setValues([[department, String(body.manager || '')]]);
   return { success: true, updated: true };
+}
+
+/**
+ * Менеджера отдела переименовали или назначили нового — обновляем колонку Manager
+ * у сотрудников этого отдела. У HR, менеджеров и Super Admin колонка пустая — не трогаем.
+ */
+function handleSyncDepartmentManager_(body) {
+  const department = String(body.department || '').trim();
+  const manager = String(body.manager || '').trim();
+  if (!department || !manager) {
+    return { success: false, error: 'department и manager обязательны' };
+  }
+
+  const empSheet = getOrCreateEmployeesSheet_();
+  const lastRow = empSheet.getLastRow();
+  if (lastRow < 2) return { success: true, updated: 0 };
+
+  const rows = empSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  let updated = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const role = String(rows[i][6] || 'Employee');
+    if (String(rows[i][2]) !== department || role !== 'Employee') continue;
+    if (String(rows[i][3]) === manager) continue;
+    empSheet.getRange(i + 2, 4).setValue(manager);
+    updated++;
+  }
+  return { success: true, updated: updated };
 }
 
 /** Сколько раз сотрудник подавал Late Check-in в месяце указанной даты. */

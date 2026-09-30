@@ -211,8 +211,11 @@ export function isDepartmentRoleBound(roles: RoleInfo): boolean {
   return roles.superAdmin || roles.hr || !!roles.managerOf;
 }
 
-/** Человек сменил имя — обновляем его профили ролей, чтобы панель /admin показывала новое. */
-export async function renameRoleProfiles(env: Env, telegramId: number, name: string): Promise<void> {
+/**
+ * Человек сменил имя — обновляем его профили ролей, чтобы панель /admin показывала новое.
+ * Возвращает названия отделов, которыми он руководит: там надо обновить колонку Manager.
+ */
+export async function renameRoleProfiles(env: Env, telegramId: number, name: string): Promise<string[]> {
   const [hr, superAdmins] = await Promise.all([getHrProfile(env), getSuperAdmins(env)]);
   if (hr && hr.telegramId === telegramId) {
     await setHrProfile(env, { ...hr, name });
@@ -224,10 +227,13 @@ export async function renameRoleProfiles(env: Env, telegramId: number, name: str
     );
   }
   // один человек может руководить и несколькими отделами
+  const managed: string[] = [];
   for (const d of DEPARTMENTS) {
     const mgr = await getManagerProfile(env, d.id);
     if (mgr && mgr.telegramId === telegramId) {
       await setManagerProfile(env, d.id, { ...mgr, name });
+      managed.push(d.label);
     }
   }
+  return managed;
 }

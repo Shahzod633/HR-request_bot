@@ -13,8 +13,18 @@ async function callAppsScript(env: Env, body: Record<string, unknown>): Promise<
   } catch {
     // вместо JSON Google отдаёт HTML-страницу — в ней и написана причина:
     // ошибка загрузки скрипта, страница входа (закрыт доступ к веб-приложению) и т.п.
-    const page = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-    json = { success: false, error: `Apps Script returned a page instead of JSON (HTTP ${res.status}): ${page}` };
+    const page = text
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ') // служебный JS/CSS Google — не причина
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200);
+    // куда Google перенаправил: accounts.google.com — закрыт доступ, иначе — ошибка самого скрипта
+    const where = res.url ? new URL(res.url).hostname : 'unknown';
+    json = {
+      success: false,
+      error: `Apps Script returned a page instead of JSON (HTTP ${res.status}, ${where}): ${page || '(empty page)'}`,
+    };
   }
   if (!json?.success) {
     console.error(`Apps Script error (${body.action}):`, json?.error);
@@ -70,6 +80,11 @@ export async function updateEmployeeDepartment(
   manager: string
 ) {
   return callAppsScript(env, { action: 'update_department', telegramId, department, manager });
+}
+
+/** Колонка Manager у сотрудников отдела — после переименования или смены менеджера. */
+export async function syncDepartmentManager(env: Env, department: string, manager: string) {
+  return callAppsScript(env, { action: 'sync_department_manager', department, manager });
 }
 
 export interface RolePersonPayload {

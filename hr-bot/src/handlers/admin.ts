@@ -18,8 +18,8 @@ import { startRegistration } from './registration';
 import { grantEmployeeAccess } from '../access';
 import { sendEmployeeList } from './employeeList';
 import { DEPARTMENTS, findDepartment } from '../config';
-import { registerRolePerson } from '../appsScriptClient';
 import { runInBackground } from '../background';
+import { syncSheetRole } from '../roleSheet';
 
 const personName = (p: RoleProfile) => p.name || `id ${p.telegramId}`;
 
@@ -65,16 +65,9 @@ async function handleSuperAdminsMenu(env: Env, chatId: number, data: string) {
 
   if (action === 'sa_remove_yes') {
     await removeSuperAdmin(env, telegramId);
-    // профиль сотрудника остаётся; в листе Employees пометку роли меняем на Employee
-    runInBackground(
-      registerRolePerson(env, {
-        telegramId,
-        name: target.name,
-        department: target.department,
-        username: target.username || '',
-        role: 'Employee',
-      })
-    );
+    // профиль сотрудника остаётся; пометку роли в листе Employees пересчитываем
+    // по оставшимся ролям — вдруг человек ещё и HR или менеджер
+    runInBackground(syncSheetRole(env, telegramId, target));
     await sendMessage(env, telegramId, 'ℹ️ Your Super Admin role has been removed by Admin.');
     await sendMessage(env, chatId, `✅ ${personName(target)} is no longer a Super Admin.`);
   }

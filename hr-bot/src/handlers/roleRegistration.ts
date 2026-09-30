@@ -2,8 +2,15 @@ import type { Env, RoleKind, RoleProfile, Session } from '../types';
 import { findDepartment } from '../config';
 import { sendMessage, answerCallbackQuery } from '../telegram';
 import { saveSession } from '../session';
-import { setHrProfile, setManagerProfile, addSuperAdmin } from '../roles';
-import { registerRolePerson } from '../appsScriptClient';
+import {
+  setHrProfile,
+  setManagerProfile,
+  addSuperAdmin,
+  getHrProfile,
+  getManagerProfile,
+} from '../roles';
+import { registerRolePerson, syncDepartmentManager } from '../appsScriptClient';
+import { syncSheetRole } from '../roleSheet';
 import { runInBackground } from '../background';
 import { buildDepartmentKeyboard } from '../keyboards';
 import { showHomeMenu } from './menu';
@@ -102,6 +109,14 @@ async function finishRoleRegistration(
   role: RoleKind,
   departmentId: string
 ) {
+  // HR и менеджер отдела — по одному: новый вытесняет прежнего. Super Admin — список
+  const previous =
+    role === 'hr'
+      ? await getHrProfile(env)
+      : role === 'manager'
+        ? await getManagerProfile(env, departmentId)
+        : null;
+
   if (role === 'hr') {
     await setHrProfile(env, profile);
   } else if (role === 'super_admin') {
@@ -111,14 +126,29 @@ async function finishRoleRegistration(
     await setManagerProfile(env, departmentId, profile);
   }
 
+  // по порядку: сначала новый человек, потом прежний (его пометка пересчитывается
+  // по оставшимся ролям), потом колонка Manager у сотрудников отдела
   runInBackground(
-    registerRolePerson(env, {
-      telegramId,
-      name: profile.name,
-      department: profile.department,
-      username: profile.username || '',
-      role: role === 'hr' ? 'HR' : role === 'super_admin' ? 'Super Admin' : 'Manager',
-    })
+    (async () => {
+      await registerRolePerson(env, {
+        telegramId,
+        name: profile.name,
+        department: profile.department,
+        username: profile.username || '',
+        role: role === 'hr' ? 'HR' : role === 'super_admin' ? 'Super Admin' : 'Manager',
+      });
+      if (previous && previous.telegramId !== telegramId) {
+        await syncSheetRole(env, previous.telegramId, previous);
+        await sendMessage(
+          env,
+          previous.telegramId,
+          `ℹ️ You are no longer ${roleTitle(role, profile.department)} — the role has been given to ${profile.name}.`
+        );
+      }
+      if (role === 'manager') {
+        await syncDepartmentManager(env, profile.department, profile.name);
+      }
+    })()
   );
 
   // HR, менеджер и Super Admin — тоже люди, которые опаздывают и берут отгулы,
